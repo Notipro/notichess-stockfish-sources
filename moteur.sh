@@ -148,6 +148,8 @@ readonly ARCHIVE_JS_SHA256=04ab07ed29bdf4393187eb6f73bdf0f9d422168050f326cec039f
 
 racine=$(cd "$(dirname "$0")/.." && pwd)
 jnilibs="$racine/android/app/src/main/jniLibs"
+# Le make qui compile le moteur : sous Windows, choisi par preparer_windows.
+make=make
 # Le cache de la cible, posé par cible_android ou cible_ios.
 cache=
 
@@ -235,7 +237,7 @@ compiler() {
   # le binaire ne doit dépendre que de ce script et du NDK.
   if ! (cd "$dossier/stockfish/src" &&
     env -u CXXFLAGS -u LDFLAGS -u DEPENDFLAGS -u EXTRACXXFLAGS -u COMPCXX \
-      make -j"$taches" build ARCH="$arch" COMP=ndk KERNEL=Linux \
+      "$make" -j"$taches" build ARCH="$arch" COMP=ndk KERNEL=Linux \
       EXTRALDFLAGS="$DRAPEAUX_EDITION") > "$dossier/make.log" 2>&1; then
     cat "$dossier/make.log" >&2
     echo "moteur : la compilation de $abi a échoué, rien n'est installé." >&2
@@ -254,6 +256,53 @@ compiler() {
   echo "moteur : $abi/libstockfish.so compilé, aligné sur 16 Ko et installé ($VERSION)"
 }
 
+# Sous Windows, dans Git Bash (MOT-29). Deux écarts avec macOS et Linux, aucun
+# dans la compilation elle-même :
+#   - le make doit être celui de MSYS2, POSIX. Le make natif de Windows
+#     (MinGW) lance les recettes du Makefile de Stockfish avec cmd.exe et
+#     sépare son VPATH par « ; » : « No rule to make target 'tbprobe.o' » ;
+#   - le NDK livre ses compilateurs (aarch64-linux-android29-clang++...) en
+#     fichiers .cmd, que bash ne lance pas. Un relais de même nom, posé dans
+#     le dossier de compilation, fait ce que fait son .cmd : appeler
+#     clang++.exe avec la cible que porte le nom.
+#
+# Le make retenu est le premier make POSIX du PATH, pas le premier make : le
+# PATH de la machine, où s'installent les chaînes MinGW, passe sous Windows
+# avant celui de l'utilisateur, que seul un administrateur peut réordonner.
+preparer_windows() {
+  local outils=$1 candidat hote ecartes=()
+  make=
+  while IFS= read -r candidat; do
+    # Un make qui ne sait pas répondre est écarté, pas fatal (set -e).
+    hote=$("$candidat" --version 2>/dev/null | sed -n 's/^Built for //p') || true
+    case "$hote" in
+      *-msys | *-cygwin)
+        make=$candidat
+        break
+        ;;
+    esac
+    ecartes+=("$candidat, construit pour ${hote:-un hôte inconnu}")
+  done < <(type -ap make)
+  if [ -z "$make" ]; then
+    echo "moteur : sous Windows, il faut le make POSIX de MSYS2, et le PATH n'en a aucun." >&2
+    [ ${#ecartes[@]} -eq 0 ] || printf '  écarté : %s\n' "${ecartes[@]}" >&2
+    echo "  Le make natif de Windows lance les recettes du Makefile de Stockfish avec cmd.exe." >&2
+    echo "  Installation : CLAUDE.md, section « Android sous Windows »." >&2
+    exit 1
+  fi
+
+  local relais="$construction/relais" cmd nom
+  mkdir "$relais"
+  for cmd in "$outils"/*-clang++.cmd; do
+    [ -f "$cmd" ] || continue
+    nom=$(basename "$cmd" .cmd)
+    printf '#!/usr/bin/env bash\nexec "%s/clang++.exe" --target=%s "$@"\n' \
+      "$outils" "${nom%-clang++}" > "$relais/$nom"
+    chmod +x "$relais/$nom"
+  done
+  export PATH="$relais:$PATH"
+}
+
 cible_android() {
   cache="$racine/.cache/moteur/$VERSION"
   ndk=${1:-${ANDROID_NDK_ROOT:-}}
@@ -261,6 +310,13 @@ cible_android() {
     echo "moteur : NDK manquant. Usage : scripts/moteur.sh android <dossier du NDK> (ou ANDROID_NDK_ROOT)." >&2
     exit 1
   fi
+  local windows=
+  case "$(uname -s)" in
+    MINGW* | MSYS* | CYGWIN*) windows=1 ;;
+  esac
+  # Gradle, sous Windows, donne le NDK en chemin Windows (C:/...) : lu en
+  # chemin POSIX (/c/...), sans quoi son « : » couperait l'entrée du PATH.
+  [ -z "$windows" ] || ndk=$(cygpath -u "$ndk")
   local outils
   outils=$(echo "$ndk"/toolchains/llvm/prebuilt/*/bin)
   if [ ! -x "$outils/llvm-readelf" ] || [ ! -f "$ndk/source.properties" ]; then
@@ -290,6 +346,8 @@ cible_android() {
   construction=$(mktemp -d "$cache/construction.XXXXXX")
   trap 'rm -rf "$construction"' EXIT
   trap 'exit 1' INT TERM HUP
+
+  [ -z "$windows" ] || preparer_windows "$outils"
 
   compiler arm64-v8a armv8
   compiler armeabi-v7a armv7-neon
@@ -353,8 +411,11 @@ cible_sources() {
   cp "${BASH_SOURCE[0]}" "$destination/moteur.sh"
   (
     cd "$destination"
+    # Sous Windows, le shasum de Git marque chaque nom d'un « * » (mode
+    # binaire) : retiré, pour que SHA256SUMS soit celui de la Release publiée,
+    # « <empreinte>  <nom> », quel que soit le poste.
     shasum -a 256 "$ARCHIVE" "$GRAND_RESEAU" "$PETIT_RESEAU" "$ARCHIVE_JS" \
-      moteur.sh > SHA256SUMS
+      moteur.sh | sed 's/ \*/  /' > SHA256SUMS
     page_des_sources > index.html
   )
   echo "moteur : source correspondante assemblée dans $destination"

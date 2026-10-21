@@ -20,7 +20,7 @@ compiles the Android engine and copies the iOS engine into the app;
 `index.html`, the detailed description of what is shipped and how to rebuild
 it; `SHA256SUMS`, the checksums of every file.
 
-In the [`stockfish-18` release](https://github.com/Notipro/notichess-stockfish-sources/releases/tag/stockfish-18):
+In the [`stockfish-18-bb90dc73` release](https://github.com/Notipro/notichess-stockfish-sources/releases/tag/stockfish-18-bb90dc73):
 
 - `stockfish-android-armv8.tar`
 - `nn-c288c895ea92.nnue`
@@ -63,7 +63,7 @@ moteur Android, et copie le moteur iOS dans l'app ; `index.html`, la
 description détaillée de ce qui est livré et de la façon de le reconstruire ;
 `SHA256SUMS`, les empreintes de chaque fichier.
 
-Dans la [Release `stockfish-18`](https://github.com/Notipro/notichess-stockfish-sources/releases/tag/stockfish-18) :
+Dans la [Release `stockfish-18-bb90dc73`](https://github.com/Notipro/notichess-stockfish-sources/releases/tag/stockfish-18-bb90dc73) :
 
 - `stockfish-android-armv8.tar`
 - `nn-c288c895ea92.nnue`
